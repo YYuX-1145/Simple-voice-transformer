@@ -7,13 +7,14 @@ import torch
 import torchcrepe
 import os
 import gradio as gr
-
+import matplotlib as mpl
+from multiprocessing import Process
 
 # audio_name='audio2.wav'
 # TARGET_F0=150
 
 
-def main(audio_path,target_f0,length):
+def main(audio_path,target_f0,length,hop_size):
     if audio_path in [None,'']:
         return None,'audio?'
     y,sr=librosa.load(audio_path,sr=None)
@@ -22,10 +23,8 @@ def main(audio_path,target_f0,length):
     fmin = 50
     fmax = 550
     model = 'tiny'
-    # Pick a batch size that doesn't cause memory errors on your gpu
-    batch_size = 2048
-    hop_length = int(sr / 100.0)
-    # Compute pitch using first gpu
+    batch_size = 2048    
+    hop_length = int(sr*hop_size/ 1000)
     pitch = torchcrepe.predict(audio,
                            sr,
                            hop_length,
@@ -37,10 +36,7 @@ def main(audio_path,target_f0,length):
                         )
     print(pitch)
     values_list = pitch.tolist()[0]
-    f0=0.0
-    for s,i in enumerate(values_list):
-        f0+=i
-    f0=f0/s
+    f0=sum(values_list)/len(values_list)
     print(f0)
     ##resample
     tr_sr = int(sr * target_f0 / f0)
@@ -58,13 +54,19 @@ def plot(audio_path):
     y,sr=librosa.load(audio_path,sr=None)   
     m=librosa.stft(y, n_fft=2048, hop_length=None, win_length=None, window='hann', center=True, pad_mode='reflect')
     '''
+    p=Process(target=plot_show, args=[audio_path])
+    p.start()
+    p.join()
+    
+    return 'ok'
+
+def plot_show(audio_path):
     sr, y = wavfile.read(audio_path)
     m = np.fft.fft(y)
     plt.figure()
     plt.plot(np.abs(m))
-    plt.savefig('fig.png',dpi=300)
-    os.startfile("fig.png")
-    return 'ok'
+    mpl.use("TkAgg")
+    plt.show()    
 
 
 if __name__=="__main__":
@@ -73,14 +75,15 @@ if __name__=="__main__":
             with gr.TabItem(label=''):
                 with gr.Row():
                     with gr.Column():
-                        target_f0=gr.Slider(label="目标频率",minimum=50,maximum=500,step=1,value=180)
+                        target_f0=gr.Slider(label="目标频率",minimum=50,maximum=500,step=10,value=180)
                         length_scale = gr.Slider(label="音频播放长度",minimum=0.5, maximum=2, step=0.1,value=1)
+                        hop_size = gr.Slider(label="hop_size(ms)", minimum=1, maximum=200, step=5,value=10)
                     with gr.Column():
                         input_audio=gr.Audio(label="输入音频",type='filepath')
                         output_audio=gr.Audio(label="输出音频")
                         textbox=gr.Textbox(label='',interactive=False,value='')
                         vc_btn=gr.Button(value="开始转换")
                         plot_btn=gr.Button(value='画图')
-        vc_btn.click(fn=main,inputs=[input_audio,target_f0,length_scale],outputs=[output_audio,textbox])
+        vc_btn.click(fn=main,inputs=[input_audio,target_f0,length_scale,hop_size],outputs=[output_audio,textbox])
         plot_btn.click(fn=plot,inputs=[input_audio],outputs=[textbox])
     app.launch(share=False,inbrowser=True)
